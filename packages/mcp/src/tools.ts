@@ -21,6 +21,45 @@ import {
   markdownToHtml,
 } from '@upnote/core';
 
+// Create a note via URL scheme, wait for UpNote to write AND sync it to Firebase
+// (synced=0→1), then write HTML — mirroring the "update" sync path that
+// upnote_edit_note uses, which reliably reads from SQLite rather than memory.
+async function createNoteWithHtml(
+  title: string,
+  fullHtml: string,
+  plainText: string,
+  summary: string | null,
+  newWindow: boolean
+): Promise<string | null> {
+  const since = Date.now();
+  createNote({ title, newWindow });
+
+  // Phase 1 — wait for UpNote to write the new note to SQLite (typically < 500 ms)
+  let noteId: string | null = null;
+  const appearDeadline = since + 6000;
+  while (Date.now() < appearDeadline) {
+    await new Promise<void>((r) => setTimeout(r, 150));
+    noteId = findRecentNoteByTitle(title, since - 1000);
+    if (noteId) break;
+  }
+  if (!noteId) return null;
+
+  // Phase 2 — wait for UpNote's initial Firebase upload to finish (synced=0→1).
+  // Writing after synced=1 ensures UpNote treats our write as an "update" and
+  // re-reads from SQLite (not memory) when it re-syncs — matching the path that
+  // upnote_edit_note uses reliably.
+  const syncDeadline = Date.now() + 8000;
+  while (Date.now() < syncDeadline) {
+    await new Promise<void>((r) => setTimeout(r, 400));
+    const row = getNote(noteId);
+    if (row?.synced === 1) break;
+  }
+
+  writeNote(noteId, { html: fullHtml, text: plainText, title, summary });
+  openNote({ noteId });
+  return noteId;
+}
+
 export function registerTools(server: McpServer): void {
   // --- READ TOOLS ---
 
@@ -151,35 +190,18 @@ export function registerTools(server: McpServer): void {
         };
       }
 
-      // With content: create via URL scheme (registers the note in UpNote's memory
-      // model), then poll SQLite until the note appears and immediately overwrite
-      // with our HTML — before UpNote's background Firebase sync can upload the
-      // plain-text version. UpNote sees synced=0 and re-uploads our HTML.
       const newHtml = await markdownToHtml(params.markdownContent);
       const fullHtml = `<h2>${params.title}</h2>\n${newHtml}`;
       const plainText = params.markdownContent.replace(/[#*_`~>\-[\]]/g, ' ').replace(/\s+/g, ' ').trim();
       const summary = plainText.substring(0, 150) || null;
 
-      const since = Date.now();
-      createNote({ title: params.title, newWindow: params.newWindow });
-
-      // Poll until UpNote writes the note to SQLite (typically < 500 ms)
-      let noteId: string | null = null;
-      const deadline = since + 8000;
-      while (Date.now() < deadline) {
-        await new Promise<void>((r) => setTimeout(r, 150));
-        noteId = findRecentNoteByTitle(params.title, since - 1000);
-        if (noteId) break;
-      }
+      const noteId = await createNoteWithHtml(params.title, fullHtml, plainText, summary, params.newWindow ?? false);
 
       if (!noteId) {
         return {
-          content: [{ type: 'text', text: `Created note "${params.title}" in UpNote (title only — Markdown formatting could not be applied: note did not appear in database within 8 s). Is UpNote running?` }],
+          content: [{ type: 'text', text: `Created note "${params.title}" in UpNote (title only — Markdown formatting could not be applied: note did not appear in database within 6 s). Is UpNote running?` }],
         };
       }
-
-      writeNote(noteId, { html: fullHtml, text: plainText, title: params.title, summary });
-      openNote({ noteId });
 
       return {
         content: [{ type: 'text', text: `Created note "${params.title}" with Markdown content. Note ID: ${noteId}` }],
@@ -225,26 +247,13 @@ export function registerTools(server: McpServer): void {
       const summary = plainText.substring(0, 150) || null;
 
       if (params.safe) {
-        // URL scheme only supports plain text in v1101+ — must use polling approach
-        const since = Date.now();
-        createNote({ title: existing.title, newWindow: false });
-
-        let noteId: string | null = null;
-        const deadline = since + 8000;
-        while (Date.now() < deadline) {
-          await new Promise<void>((r) => setTimeout(r, 150));
-          noteId = findRecentNoteByTitle(existing.title, since - 1000);
-          if (noteId) break;
-        }
+        const noteId = await createNoteWithHtml(existing.title, fullHtml, plainText, summary, false);
 
         if (!noteId) {
           return {
-            content: [{ type: 'text', text: `Created replacement note "${existing.title}" (title only — Markdown not applied: note not found in DB within 8s). Original (${params.noteId}) preserved.` }],
+            content: [{ type: 'text', text: `Created replacement note "${existing.title}" (title only — Markdown not applied: note not found in DB within 6s). Original (${params.noteId}) preserved.` }],
           };
         }
-
-        writeNote(noteId, { html: fullHtml, text: plainText, title: existing.title, summary });
-        openNote({ noteId });
 
         return {
           content: [{ type: 'text', text: `Created replacement note "${existing.title}" with Markdown content. Note ID: ${noteId}. Original (${params.noteId}) preserved.` }],
