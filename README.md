@@ -404,6 +404,7 @@ Tests use an **in-memory SQLite database** with synthetic fixture data. No real 
 | **No attachment support** | The `files` table exists but is empty in tested environments. Attaching files to notes requires an upload mechanism UpNote does not expose. |
 | **Schema version tied to UpNote v16** | If UpNote updates its database schema, the `dataVersion` check will fail loudly. Open an issue with the new version number. |
 | **IDs are UUIDs, not human-readable** | You need to run `upnote list notebooks` or `upnote list notes` to discover IDs before using commands that require them. |
+| **Create → search delay** | Notes created via `upnote_create_note` or `upnote new` are written to SQLite by UpNote asynchronously. `search_notes` and `list_notes` may return empty for a new note until UpNote has had focus for a few seconds. This is not a bug — run the search again after a brief pause. |
 | **No real-time sync detection** | The tool reads a snapshot of the database. Changes made in UpNote after the last query won't be visible until the next query. |
 
 ---

@@ -37,7 +37,7 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     'upnote_list_notes',
-    'List notes from UpNote, optionally filtered by notebook ID or tag name. Returns id, title, summary, and timestamps.',
+    'List notes from UpNote, optionally filtered by notebook ID or tag name. Returns id, title, summary, and timestamps. Note: notes created via upnote_create_note may not appear immediately — UpNote must write them to its local database first (give it a few seconds with focus).',
     {
       notebookId: z.string().optional().describe('Filter by notebook ID'),
       tag: z.string().optional().describe('Filter by tag name'),
@@ -54,7 +54,7 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     'upnote_search_notes',
-    'Search UpNote notes by title or content text. Returns matching note summaries with IDs.',
+    'Search UpNote notes by title or content text. Returns matching note summaries with IDs. Note: queries the local SQLite database — notes created via upnote_create_note may not appear for a few seconds until UpNote flushes them to disk. Existing notes always return immediately.',
     {
       query: z.string().min(1).describe('Search query string'),
       limit: z.number().int().min(1).max(100).optional().default(20).describe('Maximum results'),
@@ -136,7 +136,7 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     'upnote_create_note',
-    'Create a new note in UpNote. Accepts full Markdown for content (headers, lists, code, tables, checkboxes). Requires UpNote to be running or installed.',
+    'Create a new note in UpNote. Accepts full Markdown for content (headers, lists, code, tables, checkboxes). Requires UpNote to be running or installed. The note is created asynchronously — wait a few seconds before using upnote_search_notes or upnote_list_notes to find it.',
     {
       title: z.string().min(1).describe('Note title'),
       markdownContent: z.string().optional().describe('Note body in Markdown format'),
