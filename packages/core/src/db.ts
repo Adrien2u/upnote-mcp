@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { copyFileSync, unlinkSync } from 'fs';
+import { copyFileSync, existsSync, unlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { getDbPath, assertDataVersion } from './paths.js';
@@ -18,12 +18,16 @@ export function withDb<T>(fn: (db: Database.Database) => T): T {
   const src = getDbPath();
   const tmp = join(tmpdir(), `upnote_read_${Date.now()}.sqlite3`);
   copyFileSync(src, tmp);
+  if (existsSync(`${src}-wal`)) copyFileSync(`${src}-wal`, `${tmp}-wal`);
+  if (existsSync(`${src}-shm`)) copyFileSync(`${src}-shm`, `${tmp}-shm`);
   const db = new Database(tmp, { readonly: true });
   try {
     return fn(db);
   } finally {
     db.close();
     try { unlinkSync(tmp); } catch { /* best effort */ }
+    try { unlinkSync(`${tmp}-wal`); } catch { /* best effort */ }
+    try { unlinkSync(`${tmp}-shm`); } catch { /* best effort */ }
   }
 }
 
