@@ -34,11 +34,22 @@ UpNote has no official API. This project reverse-engineers the local SQLite data
 | Operation | Method | UpNote Required? |
 |-----------|--------|-----------------|
 | Read notes, notebooks, tags | Direct SQLite query (temp copy, read-only) | No |
-| Create note / notebook | `upnote://x-callback-url/...` via PowerShell | Yes (auto-launched) |
+| Create note (title only) | `upnote://x-callback-url/note/new` via PowerShell | Yes (auto-launched) |
+| Create note (with Markdown) | URL scheme → wait for Firebase sync → SQLite write → re-sync | Yes + internet |
 | Edit note | SQLite write with `synced=0` → UpNote syncs on focus | Yes (to sync) |
 | Open note / navigate | `upnote://x-callback-url/...` | Yes |
 
 **Read operations work even when UpNote is closed.** The database is copied to a temp file before each query so there is no lock contention with the running app.
+
+### Why create-with-content takes a few seconds
+
+UpNote's x-callback-url scheme does not accept HTML or rich Markdown — only plain text. To produce a properly formatted note, this tool uses a two-phase write strategy:
+
+1. **URL scheme** — creates the note in UpNote's memory with the title. UpNote writes it to SQLite (`synced=0`) and immediately uploads the title-only version to Firebase, marking it `synced=1`.
+2. **SQLite write** — once `synced=1` is detected (typically 1–3 s), the tool writes the converted HTML to SQLite (`synced=0`). This triggers UpNote's *update* sync path, which reads from SQLite rather than memory, so the full rich content is what gets uploaded to Firebase.
+3. **Open** — `openNote` is called to bring the note into focus; UpNote picks up the `synced=0` flag and syncs the HTML version.
+
+Writing *before* the initial Firebase sync completes causes a race condition where UpNote's in-memory title-only state wins. Waiting for `synced=1` first eliminates that race reliably.
 
 ---
 
@@ -268,7 +279,7 @@ UpNote provides no edit endpoint via x-callback-url. This project uses two strat
 upnote edit <noteId> --content "## New Content\n\nUpdated text."
 ```
 
-Writes directly to `upnote.sqlite3` with `synced=0`, then opens the note in UpNote to trigger Firebase sync. **UpNote treats this as a local change and uploads it normally.**
+Converts the Markdown to HTML, writes it directly to `upnote.sqlite3` with `synced=0`, then opens the note in UpNote. UpNote detects `synced=0`, reads the updated HTML from SQLite, and uploads it to Firebase.
 
 Fields updated: `html`, `text`, `title`, `summary`, `updatedAt`  
 Fields never touched: `id`, `revision`, `space`, `createdAt`, `deleted`
@@ -281,7 +292,7 @@ Fields never touched: `id`, `revision`, `space`, `createdAt`, `deleted`
 upnote edit <noteId> --content "New content" --safe
 ```
 
-Creates a new note with the same title and updated content. The original is left intact — delete it manually in UpNote if desired.
+Creates a new note with the same title and updated Markdown content using the same two-phase sync strategy as `upnote_create_note`. The original is left intact — delete it manually in UpNote if desired.
 
 ---
 
@@ -407,7 +418,8 @@ Tests use an **in-memory SQLite database** with synthetic fixture data. No real 
 | **No attachment support** | The `files` table exists but attaching files requires an upload mechanism UpNote does not expose. |
 | **Schema version tied to UpNote v16** | If UpNote updates its database schema, the `dataVersion` check will fail loudly. Open an issue with the new version number. |
 | **IDs are UUIDs, not human-readable** | You need to run `upnote list notebooks` or `upnote list notes` to discover IDs before using commands that require them. |
-| **Create → search delay** | Notes created via `upnote_create_note` or `upnote new` are written to SQLite by UpNote asynchronously. `search_notes` and `list_notes` may not return a new note immediately — query again after a brief pause. |
+| **Create with content takes 2–5 s** | `upnote_create_note` with `markdownContent` waits for UpNote's initial Firebase sync before writing HTML. This is intentional — writing too early causes the in-memory title-only state to win. Title-only creation is instant. |
+| **Create → search delay** | Notes appear in `search_notes` / `list_notes` only after UpNote has written them to SQLite. For notes created with content, this happens during the two-phase write. For title-only notes, allow a second or two after creation. |
 | **No real-time sync detection** | The tool reads a snapshot of the database. Changes made in UpNote after the last query won't be visible until the next query. |
 
 ---
