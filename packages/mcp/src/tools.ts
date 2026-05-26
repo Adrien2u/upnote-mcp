@@ -136,18 +136,32 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     'upnote_create_note',
-    'Create a new note in UpNote. Accepts full Markdown for content (headers, lists, code, tables, checkboxes). Requires UpNote to be running or installed. The note is created asynchronously — wait a few seconds before using upnote_search_notes or upnote_list_notes to find it.',
+    'Create a new note in UpNote. Content is stored as plain text (UpNote v1101+ no longer accepts Markdown via URL scheme). To create a note with rich Markdown formatting, create the note first then immediately call upnote_edit_note with the note ID. Requires UpNote to be running. Note appears in UpNote after a few seconds.',
     {
       title: z.string().min(1).describe('Note title'),
-      markdownContent: z.string().optional().describe('Note body in Markdown format'),
-      notebookId: z.string().optional().describe('Target notebook ID (from upnote_list_notebooks)'),
+      markdownContent: z.string().optional().describe('Note body as plain text. For rich Markdown formatting, call upnote_edit_note immediately after with the returned note ID.'),
       newWindow: z.boolean().optional().default(false).describe('Open in a new UpNote window'),
     },
     async (params) => {
       createNote(params);
       return {
-        content: [{ type: 'text', text: `Created note "${params.title}" in UpNote.` }],
+        content: [{ type: 'text', text: `Created note "${params.title}" in UpNote. Use upnote_edit_note to add formatted Markdown content.` }],
       };
+    }
+  );
+
+  server.tool(
+    'upnote_move_to_trash',
+    'Move a note to the UpNote trash.',
+    {
+      noteId: z.string().min(1).describe('Note ID to move to trash'),
+    },
+    async (params) => {
+      const { execSync } = await import('child_process');
+      const url = `upnote://x-callback-url/note/moveToTrash?noteId=${encodeURIComponent(params.noteId)}`;
+      const escaped = url.replace(/'/g, "''");
+      execSync(`powershell -Command "Start-Process '${escaped}'"`, { stdio: 'ignore' });
+      return { content: [{ type: 'text', text: `Moved note ${params.noteId} to trash.` }] };
     }
   );
 
@@ -227,7 +241,7 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     'upnote_search_ui',
-    'Open UpNote with a search query (navigates UpNote UI to show search results).',
+    'Open UpNote and trigger a search query in the UI. Note: the search URL scheme was removed in UpNote v1101; this may open UpNote without the query pre-filled.',
     {
       query: z.string().min(1).describe('Search query'),
     },

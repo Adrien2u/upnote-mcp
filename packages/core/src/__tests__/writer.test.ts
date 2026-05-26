@@ -23,9 +23,9 @@ function getCapturedUrl(): string {
 }
 
 describe('createNote', () => {
-  it('builds upnote://x-callback-url/createNote URL', () => {
+  it('builds upnote://x-callback-url/note/new URL', () => {
     createNote({ title: 'Test Note' });
-    expect(getCapturedUrl()).toContain('upnote://x-callback-url/createNote');
+    expect(getCapturedUrl()).toContain('upnote://x-callback-url/note/new');
   });
 
   it('URL-encodes the title parameter', () => {
@@ -33,16 +33,16 @@ describe('createNote', () => {
     expect(getCapturedUrl()).toContain('title=Hello%20World');
   });
 
-  it('includes markdown parameter when provided', () => {
+  it('includes text parameter when content provided', () => {
     createNote({ title: 'T', markdownContent: '**bold**' });
     const url = getCapturedUrl();
-    expect(url).toContain('markdown=');
+    expect(url).toContain('text=');
     expect(url).toContain(encodeURIComponent('**bold**'));
   });
 
-  it('includes notebookId when provided', () => {
-    createNote({ title: 'T', notebookId: 'nb-123' });
-    expect(getCapturedUrl()).toContain('notebookId=nb-123');
+  it('does not include notebookId (removed in UpNote v1101+ URL scheme)', () => {
+    createNote({ title: 'T' });
+    expect(getCapturedUrl()).not.toContain('notebookId');
   });
 
   it('omits notebookId when not provided', () => {
@@ -140,9 +140,9 @@ describe('searchUi', () => {
 });
 
 describe('viewTag', () => {
-  it('builds upnote://x-callback-url/viewTag URL', () => {
+  it('builds upnote://x-callback-url/tag/view URL', () => {
     viewTag('work');
-    expect(getCapturedUrl()).toContain('upnote://x-callback-url/viewTag');
+    expect(getCapturedUrl()).toContain('upnote://x-callback-url/tag/view');
   });
 
   it('includes tag parameter', () => {

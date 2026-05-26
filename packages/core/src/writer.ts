@@ -3,7 +3,6 @@ import { execSync } from 'child_process';
 export interface CreateNoteOptions {
   title: string;
   markdownContent?: string;
-  notebookId?: string;
   newWindow?: boolean;
 }
 
@@ -27,10 +26,11 @@ function openUrl(url: string): void {
 }
 
 export function createNote(opts: CreateNoteOptions): void {
-  const url = buildUrl('createNote', {
+  // UpNote v1101+ uses note/new; text param is plain text only (markdown param removed)
+  const url = buildUrl('note/new', {
     title: opts.title,
-    markdown: opts.markdownContent,
-    notebookId: opts.notebookId,
+    text: opts.markdownContent,
+    // notebookId no longer supported by URL scheme in v1101+
     newWindow: opts.newWindow ? 'true' : undefined,
   });
   openUrl(url);
@@ -57,7 +57,7 @@ export function searchUi(query: string): void {
 }
 
 export function viewTag(tagName: string): void {
-  openUrl(buildUrl('viewTag', { tag: tagName }));
+  openUrl(buildUrl('tag/view', { tag: tagName }));
 }
 
 export function viewFilter(filterId: string): void {
