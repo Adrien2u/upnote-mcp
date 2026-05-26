@@ -10,6 +10,8 @@ import {
   getBookmarked,
   listTemplates,
   writeNote,
+  insertNote,
+  findRecentNoteByTitle,
   getFilters,
 } from '../db.js';
 import {
@@ -318,6 +320,95 @@ describe('writeNote', () => {
 
   it('accepts null summary', () => {
     expect(() => writeNote(FAKE_NOTE_ID_1, { html: '<p>x</p>', text: 'x', title: 'T', summary: null })).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// insertNote
+// ---------------------------------------------------------------------------
+describe('insertNote', () => {
+  it('inserts a note and returns a UUID string id', () => {
+    const id = insertNote({ html: '<p>Hi</p>', text: 'Hi', title: 'New Note', summary: 'Hi' });
+    expect(typeof id).toBe('string');
+    expect(id.length).toBeGreaterThan(10);
+  });
+
+  it('note is retrievable via getNote after insert', () => {
+    const id = insertNote({ html: '<p>Hello</p>', text: 'Hello', title: 'Inserted', summary: null });
+    const note = getNote(id);
+    expect(note).not.toBeNull();
+    expect(note!.title).toBe('Inserted');
+    expect(note!.html).toBe('<p>Hello</p>');
+  });
+
+  it('sets synced=0 on inserted note', () => {
+    const id = insertNote({ html: '<p>x</p>', text: 'x', title: 'T', summary: null });
+    const row = testDb.prepare('SELECT synced FROM notes WHERE id=?').get(id) as { synced: number };
+    expect(row.synced).toBe(0);
+  });
+
+  it('sets deleted=0 and trashed=0', () => {
+    const id = insertNote({ html: '<p>x</p>', text: 'x', title: 'T', summary: null });
+    const row = testDb.prepare('SELECT deleted, trashed FROM notes WHERE id=?').get(id) as { deleted: number; trashed: number };
+    expect(row.deleted).toBe(0);
+    expect(row.trashed).toBe(0);
+  });
+
+  it('sets createdAt and updatedAt to current time', () => {
+    const before = Date.now();
+    const id = insertNote({ html: '<p>x</p>', text: 'x', title: 'T', summary: null });
+    const after = Date.now();
+    const row = testDb.prepare('SELECT createdAt, updatedAt FROM notes WHERE id=?').get(id) as { createdAt: number; updatedAt: number };
+    expect(row.createdAt).toBeGreaterThanOrEqual(before);
+    expect(row.createdAt).toBeLessThanOrEqual(after);
+    expect(row.updatedAt).toBe(row.createdAt);
+  });
+
+  it('each call returns a unique id', () => {
+    const id1 = insertNote({ html: '<p>a</p>', text: 'a', title: 'A', summary: null });
+    const id2 = insertNote({ html: '<p>b</p>', text: 'b', title: 'B', summary: null });
+    expect(id1).not.toBe(id2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// findRecentNoteByTitle
+// ---------------------------------------------------------------------------
+describe('findRecentNoteByTitle', () => {
+  it('finds a note created after the since timestamp', () => {
+    const before = Date.now() - 1;
+    const id = insertNote({ html: '<p>x</p>', text: 'x', title: 'Unique Title XYZ', summary: null });
+    const found = findRecentNoteByTitle('Unique Title XYZ', before);
+    expect(found).toBe(id);
+  });
+
+  it('returns null when no note with that title exists', () => {
+    const result = findRecentNoteByTitle('Nonexistent Title 99999', Date.now() - 10000);
+    expect(result).toBeNull();
+  });
+
+  it('returns null when note exists but was created before since', () => {
+    // FAKE_NOTE_ID_1 title is "Meeting Notes", created at now - 5000
+    const result = findRecentNoteByTitle('Meeting Notes', Date.now());
+    expect(result).toBeNull();
+  });
+
+  it('returns the most recently created note when duplicates exist', () => {
+    const since = Date.now() - 1;
+    insertNote({ html: '<p>first</p>', text: 'first', title: 'Duplicate Title', summary: null });
+    // Small delay via busy loop to ensure different timestamps
+    const id2 = insertNote({ html: '<p>second</p>', text: 'second', title: 'Duplicate Title', summary: null });
+    // Update the second note's createdAt to be strictly newer
+    testDb.prepare('UPDATE notes SET createdAt=? WHERE id=?').run(Date.now() + 100, id2);
+    const found = findRecentNoteByTitle('Duplicate Title', since);
+    expect(found).toBe(id2);
+  });
+
+  it('returns null for deleted notes', () => {
+    const since = Date.now() - 1;
+    const id = insertNote({ html: '<p>x</p>', text: 'x', title: 'Soon Deleted', summary: null });
+    testDb.prepare('UPDATE notes SET deleted=1 WHERE id=?').run(id);
+    expect(findRecentNoteByTitle('Soon Deleted', since)).toBeNull();
   });
 });
 

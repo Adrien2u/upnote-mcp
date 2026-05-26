@@ -188,6 +188,15 @@ export function insertNote(fields: NoteUpdate): string {
   return id;
 }
 
+export function findRecentNoteByTitle(title: string, since: number): string | null {
+  return withDb((db) => {
+    const row = db.prepare(
+      `SELECT id FROM notes WHERE title=? AND deleted=0 AND createdAt>? ORDER BY createdAt DESC LIMIT 1`
+    ).get(title, since) as { id: string } | undefined;
+    return row?.id ?? null;
+  });
+}
+
 export function getFilters(): Filter[] {
   return withDb((db) => {
     return db.prepare(`SELECT * FROM filters WHERE deleted=0`).all() as Filter[];
