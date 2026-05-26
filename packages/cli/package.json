@@ -1,0 +1,16 @@
+{
+  "name": "@upnote/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "upnote": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --out-dir dist",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest --passWithNoTests"
+  },
+  "dependencies": {
+    "@upnote/core": "workspace:*",
+    "commander": "^13.0.0"
+  }
+}
