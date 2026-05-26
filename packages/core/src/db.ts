@@ -5,7 +5,15 @@ import { join } from 'path';
 import { getDbPath, assertDataVersion } from './paths.js';
 import type { Note, Notebook, Tag, Filter, NoteSummary, NotebookSummary, TagSummary, NoteUpdate } from './types.js';
 
+// Injected by tests — bypasses file-copy and assertDataVersion
+let _testDb: Database.Database | null = null;
+
+export function __setTestDb(db: Database.Database | null): void {
+  _testDb = db;
+}
+
 export function withDb<T>(fn: (db: Database.Database) => T): T {
+  if (_testDb) return fn(_testDb);
   assertDataVersion();
   const src = getDbPath();
   const tmp = join(tmpdir(), `upnote_read_${Date.now()}.sqlite3`);
@@ -87,7 +95,7 @@ export function searchNotes(query: string, limit = 20): NoteSummary[] {
 
 export function getNote(noteId: string): Note | null {
   return withDb((db) => {
-    return db.prepare(`SELECT * FROM notes WHERE id=? AND deleted=0`).get(noteId) as Note | null;
+    return (db.prepare(`SELECT * FROM notes WHERE id=? AND deleted=0`).get(noteId) as Note | undefined) ?? null;
   });
 }
 
@@ -126,6 +134,14 @@ export function listTemplates(): NoteSummary[] {
 }
 
 export function writeNote(noteId: string, fields: NoteUpdate): void {
+  if (_testDb) {
+    const result = _testDb.prepare(
+      `UPDATE notes SET html=?, text=?, title=?, summary=?, updatedAt=?, synced=0
+       WHERE id=? AND deleted=0`
+    ).run(fields.html, fields.text, fields.title, fields.summary, Date.now(), noteId);
+    if (result.changes === 0) throw new Error(`Note not found or already deleted: ${noteId}`);
+    return;
+  }
   assertDataVersion();
   const dbPath = getDbPath();
   const db = new Database(dbPath);
