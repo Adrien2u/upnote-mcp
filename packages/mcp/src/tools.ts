@@ -219,18 +219,39 @@ export function registerTools(server: McpServer): void {
         };
       }
 
+      const newHtml = await markdownToHtml(params.markdownContent);
+      const fullHtml = `<h2>${existing.title}</h2>\n${newHtml}`;
+      const plainText = params.markdownContent.replace(/[#*_`~>\-[\]]/g, ' ').replace(/\s+/g, ' ').trim();
+      const summary = plainText.substring(0, 150) || null;
+
       if (params.safe) {
-        createNote({ title: existing.title, markdownContent: params.markdownContent });
+        // URL scheme only supports plain text in v1101+ — must use polling approach
+        const since = Date.now();
+        createNote({ title: existing.title, newWindow: false });
+
+        let noteId: string | null = null;
+        const deadline = since + 8000;
+        while (Date.now() < deadline) {
+          await new Promise<void>((r) => setTimeout(r, 150));
+          noteId = findRecentNoteByTitle(existing.title, since - 1000);
+          if (noteId) break;
+        }
+
+        if (!noteId) {
+          return {
+            content: [{ type: 'text', text: `Created replacement note "${existing.title}" (title only — Markdown not applied: note not found in DB within 8s). Original (${params.noteId}) preserved.` }],
+          };
+        }
+
+        writeNote(noteId, { html: fullHtml, text: plainText, title: existing.title, summary });
+        openNote({ noteId });
+
         return {
-          content: [{ type: 'text', text: `Created replacement note "${existing.title}". Original (${params.noteId}) preserved.` }],
+          content: [{ type: 'text', text: `Created replacement note "${existing.title}" with Markdown content. Note ID: ${noteId}. Original (${params.noteId}) preserved.` }],
         };
       }
 
-      const newHtml = await markdownToHtml(params.markdownContent);
-      const plainText = params.markdownContent.replace(/#+\s/g, '');
-      const summary = params.markdownContent.replace(/#+\s/g, '').substring(0, 150).trim() || null;
-
-      writeNote(params.noteId, { html: newHtml, text: plainText, title: existing.title, summary });
+      writeNote(params.noteId, { html: fullHtml, text: plainText, title: existing.title, summary });
       openNote({ noteId: params.noteId });
 
       return {
