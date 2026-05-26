@@ -2,7 +2,7 @@
 
 > Unofficial CLI and MCP server for [UpNote](https://getupnote.com) — read, search, create, and edit notes from the terminal or Claude.
 
-[![Tests](https://img.shields.io/badge/tests-115%20passing-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-126%20passing-brightgreen)](#testing)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-blue)](https://nodejs.org)
 [![Platform](https://img.shields.io/badge/platform-Windows-blue)](#requirements)
 [![MCP](https://img.shields.io/badge/MCP-compatible-purple)](https://modelcontextprotocol.io)
@@ -100,7 +100,7 @@ Replace `C:\\path\\to\\upnote-mcp` with the actual path where you cloned the rep
   "mcpServers": {
     "upnote": {
       "command": "node",
-      "args": ["C:\\Repositories\\upnote-mcp\\packages\\mcp\\dist\\index.js"],
+      "args": ["C:\\path\\to\\upnote-mcp\\packages\\mcp\\dist\\index.js"],
       "transport": "stdio"
     }
   }
@@ -135,11 +135,11 @@ upnote list notebooks --json
 ```
 
 ```
-Notebooks (5):
+Notebooks (3):
 
-  Development                                  7 notes  id:2eddbe51-...
-  Houston Food Bank                            5 notes  id:e36092e6-...
-  My Life                                      0 notes  id:20ab0a51-...
+  Personal Notes                               12 notes  id:a1b2c3d4-...
+  Work Projects                                 7 notes  id:e5f6a7b8-...
+  Archive                                       0 notes  id:c9d0e1f2-...
 ```
 
 #### List notes
@@ -173,11 +173,12 @@ upnote get <noteId> --format json       # Full note object
 ```powershell
 upnote new --title "Meeting Notes"
 upnote new --title "Shopping List" --content "- Milk\n- Eggs\n- Bread"
-upnote new --title "Draft" --notebook <notebookId> --content "**Bold start**"
 upnote new --title "Quick Note" --new-window
 ```
 
 Content accepts full Markdown — see [Formatting Support](#formatting-support).
+
+> **Note:** The `--notebook` option was removed in UpNote v1101 and is no longer supported by the URL scheme.
 
 #### Edit a note
 
@@ -217,7 +218,7 @@ upnote export --notebook <notebookId> --out ./work-notes
 
 ## MCP Tools Reference
 
-The MCP server exposes **15 tools**. Read tools work without UpNote running; write tools launch UpNote automatically if needed.
+The MCP server exposes **16 tools**. Read tools work without UpNote running; write tools launch UpNote automatically if needed.
 
 ### Read Tools (SQLite)
 
@@ -231,12 +232,13 @@ The MCP server exposes **15 tools**. Read tools work without UpNote running; wri
 | `upnote_get_bookmarked` | All pinned or bookmarked notes | — |
 | `upnote_list_templates` | All note templates | — |
 
-### Write Tools (x-callback-url)
+### Write Tools (x-callback-url + SQLite)
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `upnote_create_note` | Create a new note with full Markdown content | `title`, `markdownContent?`, `notebookId?`, `newWindow?` |
+| `upnote_create_note` | Create a new note with full Markdown content | `title`, `markdownContent?`, `newWindow?` |
 | `upnote_edit_note` | Edit note in-place or create replacement | `noteId`, `markdownContent`, `safe?` |
+| `upnote_move_to_trash` | Move a note to the UpNote trash | `noteId` |
 | `upnote_open_note` | Open a note in UpNote | `noteId`, `newWindow?` |
 | `upnote_create_notebook` | Create a new notebook | `title` |
 | `upnote_open_notebook` | Open a notebook in UpNote | `notebookId` |
@@ -285,7 +287,7 @@ Creates a new note with the same title and updated content. The original is left
 
 ## Formatting Support
 
-Note creation (`--content` / `markdownContent` parameter) accepts full Markdown, which UpNote converts to its internal rich-text format:
+Note creation and editing (`--content` / `markdownContent` parameter) accepts full Markdown, which is converted to UpNote's internal rich-text HTML format:
 
 | Feature | Syntax |
 |---------|--------|
@@ -315,7 +317,7 @@ upnote-mcp/
 ├── packages/
 │   ├── core/          # Shared library: SQLite queries, URL builder, HTML↔MD
 │   ├── cli/           # Terminal interface (commander.js)
-│   └── mcp/           # MCP server (stdio transport, 15 tools)
+│   └── mcp/           # MCP server (stdio transport, 16 tools)
 ```
 
 ```
@@ -353,7 +355,7 @@ pnpm test:watch
 
 ```
 packages/core/src/
-  db.ts       — SQLite read queries + guarded write
+  db.ts       — SQLite read queries + guarded write + insert
   html.ts     — HTML → Markdown (turndown) and Markdown → HTML (marked)
   paths.ts    — Database path resolution + schema version guard
   types.ts    — TypeScript interfaces for Note, Notebook, Tag, Filter
@@ -371,7 +373,7 @@ packages/cli/src/commands/
 
 packages/mcp/src/
   index.ts    — MCP server setup + stdio transport
-  tools.ts    — 15 tool definitions with Zod input schemas
+  tools.ts    — 16 tool definitions with Zod input schemas
 ```
 
 ---
@@ -382,13 +384,13 @@ packages/mcp/src/
 pnpm test
 ```
 
-**115 tests, 4 test files:**
+**126 tests, 4 test files:**
 
 | File | Tests | What it covers |
 |------|-------|----------------|
-| `db.test.ts` | 45 | All query functions, write guard, edge cases (not-found, deleted, trashed) |
+| `db.test.ts` | 56 | All query functions, write/insert guard, `findRecentNoteByTitle`, edge cases (not-found, deleted, trashed) |
 | `html.test.ts` | 35 | `htmlToMarkdown`, `markdownToHtml`, round-trips |
-| `writer.test.ts` | 27 | URL building for all 7 endpoints, encoding, param inclusion/exclusion |
+| `writer.test.ts` | 23 | URL building for all endpoints, encoding, param inclusion/exclusion |
 | `paths.test.ts` | 12 | DB path resolution, schema version guard, error cases |
 
 Tests use an **in-memory SQLite database** with synthetic fixture data. No real notes or personal data are accessed during testing. `child_process.execSync` is mocked so no URLs are opened.
@@ -400,11 +402,12 @@ Tests use an **in-memory SQLite database** with synthetic fixture data. No real 
 | Issue | Detail |
 |-------|--------|
 | **Windows only** | The write path uses PowerShell `Start-Process` to invoke the `upnote://` URL scheme. macOS users can swap this for `open` in `packages/core/src/writer.ts`. |
+| **No notebook assignment on create** | UpNote's URL scheme removed `notebookId` support in v1101. Notes are created in the default inbox. |
 | **No note update via x-callback-url** | UpNote's URL scheme has no edit endpoint. In-place editing uses the experimental SQLite write path. |
-| **No attachment support** | The `files` table exists but is empty in tested environments. Attaching files to notes requires an upload mechanism UpNote does not expose. |
+| **No attachment support** | The `files` table exists but attaching files requires an upload mechanism UpNote does not expose. |
 | **Schema version tied to UpNote v16** | If UpNote updates its database schema, the `dataVersion` check will fail loudly. Open an issue with the new version number. |
 | **IDs are UUIDs, not human-readable** | You need to run `upnote list notebooks` or `upnote list notes` to discover IDs before using commands that require them. |
-| **Create → search delay** | Notes created via `upnote_create_note` or `upnote new` are written to SQLite by UpNote asynchronously. `search_notes` and `list_notes` may return empty for a new note until UpNote has had focus for a few seconds. This is not a bug — run the search again after a brief pause. |
+| **Create → search delay** | Notes created via `upnote_create_note` or `upnote new` are written to SQLite by UpNote asynchronously. `search_notes` and `list_notes` may not return a new note immediately — query again after a brief pause. |
 | **No real-time sync detection** | The tool reads a snapshot of the database. Changes made in UpNote after the last query won't be visible until the next query. |
 
 ---
