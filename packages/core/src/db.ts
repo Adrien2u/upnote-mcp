@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import { copyFileSync, existsSync, unlinkSync } from 'fs';
+import { randomUUID } from 'crypto';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { getDbPath, assertDataVersion } from './paths.js';
@@ -160,6 +161,31 @@ export function writeNote(noteId: string, fields: NoteUpdate): void {
   } finally {
     db.close();
   }
+}
+
+export function insertNote(fields: NoteUpdate): string {
+  const id = randomUUID();
+  const now = Date.now();
+
+  const doInsert = (db: Database.Database) => {
+    db.prepare(
+      `INSERT INTO notes (id, title, html, text, summary, synced, deleted, trashed, revision, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?)`
+    ).run(id, fields.title, fields.html, fields.text, fields.summary, now, now);
+  };
+
+  if (_testDb) {
+    doInsert(_testDb);
+    return id;
+  }
+  assertDataVersion();
+  const db = new Database(getDbPath());
+  try {
+    doInsert(db);
+  } finally {
+    db.close();
+  }
+  return id;
 }
 
 export function getFilters(): Filter[] {

@@ -9,6 +9,7 @@ import {
   getBookmarked,
   listTemplates,
   writeNote,
+  insertNote,
   createNote,
   openNote,
   createNotebook,
@@ -143,43 +144,35 @@ export function registerTools(server: McpServer): void {
       newWindow: z.boolean().optional().default(false).describe('Open in a new UpNote window'),
     },
     async (params) => {
-      const createdBefore = Date.now();
-      createNote(params);
-
       if (!params.markdownContent) {
+        // Title-only: use URL scheme (simplest path, no content conflict)
+        createNote({ title: params.title, newWindow: params.newWindow });
         return {
           content: [{ type: 'text', text: `Created note "${params.title}" in UpNote.` }],
         };
       }
 
-      // Wait for UpNote to flush the new note to its SQLite WAL
-      await new Promise((r) => setTimeout(r, 2000));
-
-      // Find the note by title — prefer the one created closest to now
-      const candidates = listNotes({ limit: 20 });
-      const match = candidates.find(
-        (n) => n.title === params.title && n.createdAt >= createdBefore - 5000
-      );
-
-      if (!match) {
-        return {
-          content: [{ type: 'text', text: `Created note "${params.title}" in UpNote (content as plain text — note ID not yet visible in database; try upnote_search_notes in a few seconds).` }],
-        };
-      }
-
-      // Apply Markdown as rich HTML via SQLite
+      // With content: INSERT directly into SQLite so UpNote never gets a chance to
+      // cache or sync a plain-text version first. UpNote sees synced=0 and uploads
+      // our HTML to Firebase when it next focuses.
       const newHtml = await markdownToHtml(params.markdownContent);
-      const summary = params.markdownContent.replace(/#+\s/g, '').substring(0, 150).trim() || null;
-      writeNote(match.id, {
-        html: newHtml,
-        text: params.markdownContent,
+      // UpNote HTML format: <h2>title</h2> prefix + body
+      const fullHtml = `<h2>${params.title}</h2>\n${newHtml}`;
+      const plainText = params.markdownContent.replace(/[#*_`~>\-[\]]/g, ' ').replace(/\s+/g, ' ').trim();
+      const summary = plainText.substring(0, 150) || null;
+
+      const id = insertNote({
+        html: fullHtml,
+        text: plainText,
         title: params.title,
         summary,
       });
-      openNote({ noteId: match.id });
+
+      // Open so UpNote renders from SQLite and queues Firebase sync
+      openNote({ noteId: id });
 
       return {
-        content: [{ type: 'text', text: `Created note "${params.title}" with Markdown content. Note ID: ${match.id}` }],
+        content: [{ type: 'text', text: `Created note "${params.title}" with Markdown content. Note ID: ${id}` }],
       };
     }
   );
