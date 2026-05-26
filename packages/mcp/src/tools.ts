@@ -136,16 +136,50 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     'upnote_create_note',
-    'Create a new note in UpNote. Content is stored as plain text (UpNote v1101+ no longer accepts Markdown via URL scheme). To create a note with rich Markdown formatting, create the note first then immediately call upnote_edit_note with the note ID. Requires UpNote to be running. Note appears in UpNote after a few seconds.',
+    'Create a new note in UpNote with optional Markdown content. If markdownContent is provided, the note is created via URL scheme then the Markdown is converted to rich HTML and written directly to the database — returns the note ID so you can reference it immediately. Requires UpNote to be running.',
     {
       title: z.string().min(1).describe('Note title'),
-      markdownContent: z.string().optional().describe('Note body as plain text. For rich Markdown formatting, call upnote_edit_note immediately after with the returned note ID.'),
+      markdownContent: z.string().optional().describe('Note body in Markdown format. Will be rendered as rich text in UpNote.'),
       newWindow: z.boolean().optional().default(false).describe('Open in a new UpNote window'),
     },
     async (params) => {
+      const createdBefore = Date.now();
       createNote(params);
+
+      if (!params.markdownContent) {
+        return {
+          content: [{ type: 'text', text: `Created note "${params.title}" in UpNote.` }],
+        };
+      }
+
+      // Wait for UpNote to flush the new note to its SQLite WAL
+      await new Promise((r) => setTimeout(r, 2000));
+
+      // Find the note by title — prefer the one created closest to now
+      const candidates = listNotes({ limit: 20 });
+      const match = candidates.find(
+        (n) => n.title === params.title && n.createdAt >= createdBefore - 5000
+      );
+
+      if (!match) {
+        return {
+          content: [{ type: 'text', text: `Created note "${params.title}" in UpNote (content as plain text — note ID not yet visible in database; try upnote_search_notes in a few seconds).` }],
+        };
+      }
+
+      // Apply Markdown as rich HTML via SQLite
+      const newHtml = await markdownToHtml(params.markdownContent);
+      const summary = params.markdownContent.replace(/#+\s/g, '').substring(0, 150).trim() || null;
+      writeNote(match.id, {
+        html: newHtml,
+        text: params.markdownContent,
+        title: params.title,
+        summary,
+      });
+      openNote({ noteId: match.id });
+
       return {
-        content: [{ type: 'text', text: `Created note "${params.title}" in UpNote. Use upnote_edit_note to add formatted Markdown content.` }],
+        content: [{ type: 'text', text: `Created note "${params.title}" with Markdown content. Note ID: ${match.id}` }],
       };
     }
   );
