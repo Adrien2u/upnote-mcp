@@ -68,7 +68,7 @@ Writing *before* the initial Firebase sync completes causes a race condition whe
 
 ```powershell
 # Clone
-git clone https://github.com/Adrien2u/upnote-mcp.git
+git clone https://github.com/YOUR_USERNAME/upnote-mcp.git
 cd upnote-mcp
 
 # Install pnpm if needed
