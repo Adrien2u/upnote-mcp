@@ -13,6 +13,9 @@ import {
   insertNote,
   findRecentNoteByTitle,
   getFilters,
+  assignNoteToNotebook,
+  moveNoteToNotebook,
+  permanentlyDeleteNote,
 } from '../db.js';
 import {
   createTestDb,
@@ -409,6 +412,116 @@ describe('findRecentNoteByTitle', () => {
     const id = insertNote({ html: '<p>x</p>', text: 'x', title: 'Soon Deleted', summary: null });
     testDb.prepare('UPDATE notes SET deleted=1 WHERE id=?').run(id);
     expect(findRecentNoteByTitle('Soon Deleted', since)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// assignNoteToNotebook
+// ---------------------------------------------------------------------------
+describe('assignNoteToNotebook', () => {
+  it('appends noteId to an existing notes array', () => {
+    const newId = insertNote({ html: '<p>x</p>', text: 'x', title: 'Assign Test', summary: null });
+    assignNoteToNotebook(newId, FAKE_NOTEBOOK_ID_2);
+    const row = testDb.prepare('SELECT notes FROM notebooks WHERE id=?').get(FAKE_NOTEBOOK_ID_2) as { notes: string };
+    expect(JSON.parse(row.notes)).toContain(newId);
+  });
+
+  it('works when notebook notes column is null', () => {
+    testDb.prepare('UPDATE notebooks SET notes=NULL WHERE id=?').run(FAKE_NOTEBOOK_CHILD);
+    const newId = insertNote({ html: '<p>x</p>', text: 'x', title: 'Null Notebook Test', summary: null });
+    assignNoteToNotebook(newId, FAKE_NOTEBOOK_CHILD);
+    const row = testDb.prepare('SELECT notes FROM notebooks WHERE id=?').get(FAKE_NOTEBOOK_CHILD) as { notes: string };
+    expect(JSON.parse(row.notes)).toContain(newId);
+  });
+
+  it('is idempotent — no duplicate on second call', () => {
+    assignNoteToNotebook(FAKE_NOTE_ID_1, FAKE_NOTEBOOK_ID_1);
+    assignNoteToNotebook(FAKE_NOTE_ID_1, FAKE_NOTEBOOK_ID_1);
+    const row = testDb.prepare('SELECT notes FROM notebooks WHERE id=?').get(FAKE_NOTEBOOK_ID_1) as { notes: string };
+    const ids: string[] = JSON.parse(row.notes);
+    expect(ids.filter((id) => id === FAKE_NOTE_ID_1)).toHaveLength(1);
+  });
+
+  it('sets synced=0 on the notebook', () => {
+    testDb.prepare('UPDATE notebooks SET synced=1 WHERE id=?').run(FAKE_NOTEBOOK_ID_2);
+    const newId = insertNote({ html: '<p>x</p>', text: 'x', title: 'Sync Test', summary: null });
+    assignNoteToNotebook(newId, FAKE_NOTEBOOK_ID_2);
+    const row = testDb.prepare('SELECT synced FROM notebooks WHERE id=?').get(FAKE_NOTEBOOK_ID_2) as { synced: number };
+    expect(row.synced).toBe(0);
+  });
+
+  it('throws for non-existent notebookId', () => {
+    expect(() => assignNoteToNotebook(FAKE_NOTE_ID_1, 'nb-does-not-exist')).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// moveNoteToNotebook
+// ---------------------------------------------------------------------------
+describe('moveNoteToNotebook', () => {
+  it('removes note from source notebook', () => {
+    moveNoteToNotebook(FAKE_NOTE_ID_1, FAKE_NOTEBOOK_CHILD);
+    const row = testDb.prepare('SELECT notes FROM notebooks WHERE id=?').get(FAKE_NOTEBOOK_ID_1) as { notes: string };
+    expect(JSON.parse(row.notes)).not.toContain(FAKE_NOTE_ID_1);
+  });
+
+  it('adds note to target notebook', () => {
+    moveNoteToNotebook(FAKE_NOTE_ID_1, FAKE_NOTEBOOK_CHILD);
+    const row = testDb.prepare('SELECT notes FROM notebooks WHERE id=?').get(FAKE_NOTEBOOK_CHILD) as { notes: string };
+    expect(JSON.parse(row.notes)).toContain(FAKE_NOTE_ID_1);
+  });
+
+  it('handles a note not in any notebook (inbox → notebook)', () => {
+    const newId = insertNote({ html: '<p>x</p>', text: 'x', title: 'Inbox Note', summary: null });
+    moveNoteToNotebook(newId, FAKE_NOTEBOOK_ID_2);
+    const row = testDb.prepare('SELECT notes FROM notebooks WHERE id=?').get(FAKE_NOTEBOOK_ID_2) as { notes: string };
+    expect(JSON.parse(row.notes)).toContain(newId);
+  });
+
+  it('sets synced=0 on both source and target notebooks', () => {
+    testDb.prepare('UPDATE notebooks SET synced=1').run();
+    moveNoteToNotebook(FAKE_NOTE_ID_1, FAKE_NOTEBOOK_CHILD);
+    const src = testDb.prepare('SELECT synced FROM notebooks WHERE id=?').get(FAKE_NOTEBOOK_ID_1) as { synced: number };
+    const dst = testDb.prepare('SELECT synced FROM notebooks WHERE id=?').get(FAKE_NOTEBOOK_CHILD) as { synced: number };
+    expect(src.synced).toBe(0);
+    expect(dst.synced).toBe(0);
+  });
+
+  it('is idempotent — second move to same notebook is a no-op', () => {
+    moveNoteToNotebook(FAKE_NOTE_ID_1, FAKE_NOTEBOOK_CHILD);
+    moveNoteToNotebook(FAKE_NOTE_ID_1, FAKE_NOTEBOOK_CHILD);
+    const row = testDb.prepare('SELECT notes FROM notebooks WHERE id=?').get(FAKE_NOTEBOOK_CHILD) as { notes: string };
+    const ids: string[] = JSON.parse(row.notes);
+    expect(ids.filter((id) => id === FAKE_NOTE_ID_1)).toHaveLength(1);
+  });
+
+  it('throws for non-existent target notebookId', () => {
+    expect(() => moveNoteToNotebook(FAKE_NOTE_ID_1, 'nb-does-not-exist')).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// permanentlyDeleteNote
+// ---------------------------------------------------------------------------
+describe('permanentlyDeleteNote', () => {
+  it('sets deleted=1 on a trashed note', () => {
+    permanentlyDeleteNote(FAKE_NOTE_ID_TRASHED);
+    const row = testDb.prepare('SELECT deleted FROM notes WHERE id=?').get(FAKE_NOTE_ID_TRASHED) as { deleted: number };
+    expect(row.deleted).toBe(1);
+  });
+
+  it('sets synced=0 on the deleted note', () => {
+    permanentlyDeleteNote(FAKE_NOTE_ID_TRASHED);
+    const row = testDb.prepare('SELECT synced FROM notes WHERE id=?').get(FAKE_NOTE_ID_TRASHED) as { synced: number };
+    expect(row.synced).toBe(0);
+  });
+
+  it('throws if note is not in trash (active note)', () => {
+    expect(() => permanentlyDeleteNote(FAKE_NOTE_ID_1)).toThrow();
+  });
+
+  it('throws if note does not exist', () => {
+    expect(() => permanentlyDeleteNote('note-does-not-exist')).toThrow();
   });
 });
 

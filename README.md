@@ -2,7 +2,7 @@
 
 > Unofficial CLI and MCP server for [UpNote](https://getupnote.com) — read, search, create, and edit notes from the terminal or Claude.
 
-[![Tests](https://img.shields.io/badge/tests-126%20passing-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-141%20passing-brightgreen)](#testing)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-blue)](https://nodejs.org)
 [![Platform](https://img.shields.io/badge/platform-Windows-blue)](#requirements)
 [![MCP](https://img.shields.io/badge/MCP-compatible-purple)](https://modelcontextprotocol.io)
@@ -229,7 +229,7 @@ upnote export --notebook <notebookId> --out ./work-notes
 
 ## MCP Tools Reference
 
-The MCP server exposes **16 tools**. Read tools work without UpNote running; write tools launch UpNote automatically if needed.
+The MCP server exposes **18 tools**. Read tools work without UpNote running; write tools launch UpNote automatically if needed.
 
 ### Read Tools (SQLite)
 
@@ -247,9 +247,11 @@ The MCP server exposes **16 tools**. Read tools work without UpNote running; wri
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `upnote_create_note` | Create a new note with full Markdown content | `title`, `markdownContent?`, `newWindow?` |
+| `upnote_create_note` | Create a new note with full Markdown content and optional notebook assignment | `title`, `markdownContent?`, `notebookId?`, `newWindow?` |
 | `upnote_edit_note` | Edit note in-place or create replacement | `noteId`, `markdownContent`, `safe?` |
 | `upnote_move_to_trash` | Move a note to the UpNote trash | `noteId` |
+| `upnote_move_note` | Move a note to a different notebook | `noteId`, `notebookId` |
+| `upnote_delete_note` | Permanently delete a trashed note (must be in trash first) | `noteId` |
 | `upnote_open_note` | Open a note in UpNote | `noteId`, `newWindow?` |
 | `upnote_create_notebook` | Create a new notebook | `title` |
 | `upnote_open_notebook` | Open a notebook in UpNote | `notebookId` |
@@ -384,7 +386,7 @@ packages/cli/src/commands/
 
 packages/mcp/src/
   index.ts    — MCP server setup + stdio transport
-  tools.ts    — 16 tool definitions with Zod input schemas
+  tools.ts    — 18 tool definitions with Zod input schemas
 ```
 
 ---
@@ -395,11 +397,11 @@ packages/mcp/src/
 pnpm test
 ```
 
-**126 tests, 4 test files:**
+**141 tests, 4 test files:**
 
 | File | Tests | What it covers |
 |------|-------|----------------|
-| `db.test.ts` | 56 | All query functions, write/insert guard, `findRecentNoteByTitle`, edge cases (not-found, deleted, trashed) |
+| `db.test.ts` | 71 | All query functions, write/insert guard, notebook assignment/move, permanent delete, `findRecentNoteByTitle`, edge cases (not-found, deleted, trashed) |
 | `html.test.ts` | 35 | `htmlToMarkdown`, `markdownToHtml`, round-trips |
 | `writer.test.ts` | 23 | URL building for all endpoints, encoding, param inclusion/exclusion |
 | `paths.test.ts` | 12 | DB path resolution, schema version guard, error cases |
@@ -413,7 +415,6 @@ Tests use an **in-memory SQLite database** with synthetic fixture data. No real 
 | Issue | Detail |
 |-------|--------|
 | **Windows only** | The write path uses PowerShell `Start-Process` to invoke the `upnote://` URL scheme. macOS users can swap this for `open` in `packages/core/src/writer.ts`. |
-| **No notebook assignment on create** | UpNote's URL scheme removed `notebookId` support in v1101. Notes are created in the default inbox. |
 | **No note update via x-callback-url** | UpNote's URL scheme has no edit endpoint. In-place editing uses the experimental SQLite write path. |
 | **No attachment support** | The `files` table exists but attaching files requires an upload mechanism UpNote does not expose. |
 | **Schema version tied to UpNote v16** | If UpNote updates its database schema, the `dataVersion` check will fail loudly. Open an issue with the new version number. |

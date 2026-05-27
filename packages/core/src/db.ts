@@ -202,3 +202,59 @@ export function getFilters(): Filter[] {
     return db.prepare(`SELECT * FROM filters WHERE deleted=0`).all() as Filter[];
   });
 }
+
+export function assignNoteToNotebook(noteId: string, notebookId: string): void {
+  const run = (db: Database.Database) => {
+    const nb = db.prepare(`SELECT notes FROM notebooks WHERE id=? AND deleted=0`).get(notebookId) as { notes: string | null } | undefined;
+    if (!nb) throw new Error(`Notebook not found: ${notebookId}`);
+    const ids: string[] = nb.notes ? JSON.parse(nb.notes) : [];
+    if (!ids.includes(noteId)) {
+      ids.push(noteId);
+      db.prepare(`UPDATE notebooks SET notes=?, synced=0, updatedAt=? WHERE id=?`).run(JSON.stringify(ids), Date.now(), notebookId);
+    }
+  };
+  if (_testDb) { run(_testDb); return; }
+  assertDataVersion();
+  const db = new Database(getDbPath());
+  try { run(db); } finally { db.close(); }
+}
+
+export function moveNoteToNotebook(noteId: string, notebookId: string): void {
+  const run = (db: Database.Database) => {
+    const target = db.prepare(`SELECT notes FROM notebooks WHERE id=? AND deleted=0`).get(notebookId) as { notes: string | null } | undefined;
+    if (!target) throw new Error(`Notebook not found: ${notebookId}`);
+    const now = Date.now();
+    // Remove noteId from every other notebook that contains it
+    const allNbs = db.prepare(`SELECT id, notes FROM notebooks WHERE deleted=0 AND id!=?`).all(notebookId) as Array<{ id: string; notes: string | null }>;
+    for (const nb of allNbs) {
+      const ids: string[] = nb.notes ? JSON.parse(nb.notes) : [];
+      const idx = ids.indexOf(noteId);
+      if (idx !== -1) {
+        ids.splice(idx, 1);
+        db.prepare(`UPDATE notebooks SET notes=?, synced=0, updatedAt=? WHERE id=?`).run(JSON.stringify(ids), now, nb.id);
+      }
+    }
+    // Add to target (idempotent)
+    const targetIds: string[] = target.notes ? JSON.parse(target.notes) : [];
+    if (!targetIds.includes(noteId)) {
+      targetIds.push(noteId);
+      db.prepare(`UPDATE notebooks SET notes=?, synced=0, updatedAt=? WHERE id=?`).run(JSON.stringify(targetIds), now, notebookId);
+    }
+  };
+  if (_testDb) { run(_testDb); return; }
+  assertDataVersion();
+  const db = new Database(getDbPath());
+  try { run(db); } finally { db.close(); }
+}
+
+export function permanentlyDeleteNote(noteId: string): void {
+  const run = (db: Database.Database) => {
+    const note = db.prepare(`SELECT id FROM notes WHERE id=? AND trashed=1 AND deleted=0`).get(noteId) as { id: string } | undefined;
+    if (!note) throw new Error(`Note not found in trash: ${noteId}`);
+    db.prepare(`UPDATE notes SET deleted=1, updatedAt=?, synced=0 WHERE id=?`).run(Date.now(), noteId);
+  };
+  if (_testDb) { run(_testDb); return; }
+  assertDataVersion();
+  const db = new Database(getDbPath());
+  try { run(db); } finally { db.close(); }
+}

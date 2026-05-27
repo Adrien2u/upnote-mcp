@@ -10,6 +10,9 @@ import {
   listTemplates,
   writeNote,
   findRecentNoteByTitle,
+  assignNoteToNotebook,
+  moveNoteToNotebook,
+  permanentlyDeleteNote,
   createNote,
   openNote,
   createNotebook,
@@ -176,15 +179,25 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     'upnote_create_note',
-    'Create a new note in UpNote with optional Markdown content. If markdownContent is provided, the note is created via URL scheme then the Markdown is converted to rich HTML and written directly to the database — returns the note ID so you can reference it immediately. Requires UpNote to be running.',
+    'Create a new note in UpNote with optional Markdown content and optional notebook assignment. If markdownContent is provided, the note is created via URL scheme then the Markdown is converted to rich HTML and written directly to the database — returns the note ID so you can reference it immediately. If notebookId is provided the note is assigned to that notebook. Requires UpNote to be running.',
     {
       title: z.string().min(1).describe('Note title'),
       markdownContent: z.string().optional().describe('Note body in Markdown format. Will be rendered as rich text in UpNote.'),
+      notebookId: z.string().optional().describe('Notebook ID to assign the note to. Use upnote_list_notebooks to find IDs.'),
       newWindow: z.boolean().optional().default(false).describe('Open in a new UpNote window'),
     },
     async (params) => {
       if (!params.markdownContent) {
         createNote({ title: params.title, newWindow: params.newWindow });
+        if (params.notebookId) {
+          // Give UpNote a moment to register the new note before assigning
+          await new Promise<void>((r) => setTimeout(r, 800));
+          const noteId = findRecentNoteByTitle(params.title, Date.now() - 5000);
+          if (noteId) {
+            try { assignNoteToNotebook(noteId, params.notebookId); } catch { /* best effort */ }
+            openNotebook(params.notebookId);
+          }
+        }
         return {
           content: [{ type: 'text', text: `Created note "${params.title}" in UpNote.` }],
         };
@@ -200,6 +213,20 @@ export function registerTools(server: McpServer): void {
       if (!noteId) {
         return {
           content: [{ type: 'text', text: `Created note "${params.title}" in UpNote (title only — Markdown formatting could not be applied: note did not appear in database within 6 s). Is UpNote running?` }],
+        };
+      }
+
+      if (params.notebookId) {
+        try {
+          assignNoteToNotebook(noteId, params.notebookId);
+          openNotebook(params.notebookId);
+        } catch (err) {
+          return {
+            content: [{ type: 'text', text: `Created note "${params.title}" with Markdown content. Note ID: ${noteId}. Warning: could not assign to notebook ${params.notebookId}: ${(err as Error).message}` }],
+          };
+        }
+        return {
+          content: [{ type: 'text', text: `Created note "${params.title}" with Markdown content and assigned to notebook ${params.notebookId}. Note ID: ${noteId}` }],
         };
       }
 
@@ -339,6 +366,50 @@ export function registerTools(server: McpServer): void {
     async (params) => {
       viewFilter(params.filterId);
       return { content: [{ type: 'text', text: `Opening filter "${params.filterId}" in UpNote.` }] };
+    }
+  );
+
+  server.tool(
+    'upnote_move_note',
+    'Move a note to a different notebook. Removes it from all current notebooks and adds it to the target. Use upnote_list_notebooks to find notebook IDs.',
+    {
+      noteId: z.string().min(1).describe('Note ID to move'),
+      notebookId: z.string().min(1).describe('Target notebook ID'),
+    },
+    async (params) => {
+      try {
+        moveNoteToNotebook(params.noteId, params.notebookId);
+        openNotebook(params.notebookId);
+        return {
+          content: [{ type: 'text', text: `Moved note ${params.noteId} to notebook ${params.notebookId}. UpNote will sync on focus.` }],
+        };
+      } catch (err) {
+        return {
+          content: [{ type: 'text', text: `Failed to move note: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  server.tool(
+    'upnote_delete_note',
+    'Permanently delete a note that is already in the trash. The note MUST be in the trash first — use upnote_move_to_trash before calling this. This action is irreversible.',
+    {
+      noteId: z.string().min(1).describe('Note ID to permanently delete (must already be in trash)'),
+    },
+    async (params) => {
+      try {
+        permanentlyDeleteNote(params.noteId);
+        return {
+          content: [{ type: 'text', text: `Permanently deleted note ${params.noteId}.` }],
+        };
+      } catch (err) {
+        return {
+          content: [{ type: 'text', text: `Failed to delete note: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
     }
   );
 }
